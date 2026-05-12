@@ -19,3 +19,11 @@ vim.api.nvim_create_autocmd("VimEnter", {
 		end
 	end,
 })
+
+vim.api.nvim_create_user_command("Parent", function(opts)
+	require("vcs").load_parent_modified_files(vim.fn.getcwd(), opts.bang)
+end, { bang = true })
+
+vim.api.nvim_create_user_command("Child", function(opts)
+	require("vcs").load_child_modified_files(vim.fn.getcwd(), opts.bang)
+end, { bang = true })
