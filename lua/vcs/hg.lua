@@ -135,5 +135,47 @@ function M.get_revision_info(dir, rev, callback)
 	})
 end
 
-return M
+function M.get_primary_states(file, callback)
+	local dir = vim.fs.dirname(file)
+	local rel_file = vim.fs.basename(file)
+	async.run_shell({
+		command = "cd " .. vim.fn.shellescape(dir) .. " && hg log --follow --template '{node|short}: {desc|firstline}\\n' -- " .. vim.fn.shellescape(rel_file),
+		on_exit = function(obj)
+			if obj.code ~= 0 then
+				callback({}, nil)
+				return
+			end
+			local entries = {}
+			for _, line in ipairs(vim.split(obj.stdout or "", "\n", { plain = true })) do
+				if line ~= "" then
+					local parts = vim.split(line, ": ", { plain = true })
+					local rev = parts[1]
+					table.insert(entries, {
+						uri = "vcs://hg/commit/" .. rev .. file,
+						display = line,
+						rev = rev,
+					})
+				end
+			end
+			callback(entries, nil)
+		end,
+	})
+end
 
+function M.get_file_content(file, rev, callback)
+	rev = rev or "."
+	local dir = vim.fs.dirname(file)
+	local rel_file = vim.fs.basename(file)
+	async.run_shell({
+		command = "cd " .. vim.fn.shellescape(dir) .. " && hg cat -r " .. vim.fn.shellescape(rev) .. " -- " .. vim.fn.shellescape(rel_file),
+		on_exit = function(obj)
+			if obj.code ~= 0 then
+				callback(nil)
+				return
+			end
+			callback(obj.stdout)
+		end,
+	})
+end
+
+return M

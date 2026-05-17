@@ -302,5 +302,154 @@ function M.load_child_modified_files(dir, exclusive)
 	end)
 end
 
-return M
+local function map_cnext(buf)
+	vim.keymap.set("n", "]c", function()
+		local win_base
+		for _, win in ipairs(vim.api.nvim_list_wins()) do
+			if vim.w[win].vcs_base_window then win_base = win break end
+		end
+		if win_base and vim.api.nvim_win_is_valid(win_base) then
+			vim.api.nvim_win_call(win_base, function() pcall(vim.cmd, "cnext") end)
+		else
+			pcall(vim.cmd, "cnext")
+		end
+	end, { buffer = buf, desc = "Next revision" })
 
+	vim.keymap.set("n", "[c", function()
+		local win_base
+		for _, win in ipairs(vim.api.nvim_list_wins()) do
+			if vim.w[win].vcs_base_window then win_base = win break end
+		end
+		if win_base and vim.api.nvim_win_is_valid(win_base) then
+			vim.api.nvim_win_call(win_base, function() pcall(vim.cmd, "cprev") end)
+		else
+			pcall(vim.cmd, "cprev")
+		end
+	end, { buffer = buf, desc = "Previous revision" })
+end
+
+function M.diff(use_secondary)
+	local current_file = vim.api.nvim_buf_get_name(0)
+	if current_file == "" then return end
+
+	local name, provider = M.detect(vim.fs.dirname(current_file))
+	if not provider then return end
+
+	local get_states = use_secondary and provider.get_secondary_states or provider.get_primary_states
+	if not get_states then
+		safe_echo("No state provider available", "ErrorMsg")
+		return
+	end
+
+	safe_echo("Fetching revision states...")
+	get_states(current_file, function(entries, baseline)
+		vim.schedule(function()
+			if not entries or #entries == 0 then
+				safe_echo("No states found.", "WarningMsg")
+				return
+			end
+
+			local qf_items = {}
+
+			for _, entry in ipairs(entries) do
+				table.insert(qf_items, {
+					filename = entry.uri,
+					text = entry.display,
+				})
+			end
+
+			if baseline then
+				table.insert(qf_items, {
+					filename = baseline.uri,
+					text = baseline.display,
+				})
+			end
+
+			vim.fn.setqflist({}, "r", { items = qf_items, title = "Revision States for " .. vim.fs.basename(current_file) })
+
+			local active_buf = vim.fn.bufnr(current_file)
+			vim.g.vcs_main_buf = active_buf
+
+			map_cnext(active_buf)
+
+			pcall(vim.cmd, "cfirst")
+		end)
+	end)
+end
+
+vim.api.nvim_create_augroup("VCSSnapshots", { clear = true })
+vim.api.nvim_create_autocmd("BufReadCmd", {
+	group = "VCSSnapshots",
+	pattern = "vcs://*",
+	callback = function(args)
+		local uri = args.file
+		local parts = vim.split(uri:sub(#"vcs://" + 1), "/", { plain = true })
+		local provider_name = parts[1]
+		local rev = parts[3]
+		local path = table.concat(vim.list_slice(parts, 4), "/")
+		if path:sub(1, 1) ~= "/" then
+			path = "/" .. path
+		end
+
+		local provider = M.get_provider(provider_name)
+		if not provider or not provider.get_file_content then
+			safe_echo("Provider " .. provider_name .. " cannot fetch content", "ErrorMsg")
+			return
+		end
+
+		local bufnr = args.buf
+		vim.bo[bufnr].bufhidden = "delete"
+		vim.bo[bufnr].buflisted = false
+		vim.bo[bufnr].readonly = true
+
+		provider.get_file_content(path, rev, function(content)
+			local function populate()
+				if vim.api.nvim_buf_is_valid(bufnr) then
+					local lines = vim.split(content or "", "\n", { plain = true })
+					vim.bo[bufnr].readonly = false
+					vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+					vim.bo[bufnr].readonly = true
+					vim.bo[bufnr].modified = false
+					vim.cmd("filetype detect")
+
+					local main_buf = vim.g.vcs_main_buf
+					if main_buf and vim.api.nvim_buf_is_valid(main_buf) then
+						local win_main, win_base
+						for _, win in ipairs(vim.api.nvim_list_wins()) do
+							if vim.w[win].vcs_main_window then win_main = win end
+							if vim.w[win].vcs_base_window then win_base = win end
+						end
+
+						if win_main and win_base and vim.api.nvim_win_is_valid(win_main) and vim.api.nvim_win_is_valid(win_base) then
+							if vim.api.nvim_win_get_buf(win_main) ~= main_buf then
+								vim.api.nvim_win_set_buf(win_main, main_buf)
+							end
+							if vim.api.nvim_win_get_buf(win_base) ~= bufnr then
+								vim.api.nvim_win_set_buf(win_base, bufnr)
+							end
+
+							vim.api.nvim_win_call(win_main, function() vim.cmd("diffthis") end)
+							vim.api.nvim_win_call(win_base, function() vim.cmd("diffthis") end)
+							map_cnext(bufnr)
+						else
+							vim.cmd("diffoff!|b " .. main_buf)
+							local w_main = vim.api.nvim_get_current_win()
+							vim.cmd("vert diffsplit " .. vim.fn.fnameescape(uri))
+							local w_base = vim.api.nvim_get_current_win()
+							vim.w[w_main].vcs_main_window = true
+							vim.w[w_base].vcs_base_window = true
+						end
+					end
+				end
+			end
+
+			if vim.in_fast_event() then
+				vim.schedule(populate)
+			else
+				populate()
+			end
+		end)
+	end,
+})
+
+return M

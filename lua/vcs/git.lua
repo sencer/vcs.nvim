@@ -151,5 +151,47 @@ function M.get_revision_info(dir, rev, callback)
 	})
 end
 
-return M
+function M.get_primary_states(file, callback)
+	local dir = vim.fs.dirname(file)
+	local rel_file = vim.fs.basename(file)
+	async.run_shell({
+		command = "git -C " .. vim.fn.shellescape(dir) .. " log --follow --format='%h: %s' -- " .. vim.fn.shellescape(rel_file),
+		on_exit = function(obj)
+			if obj.code ~= 0 then
+				callback({}, nil)
+				return
+			end
+			local entries = {}
+			for _, line in ipairs(vim.split(obj.stdout or "", "\n", { plain = true })) do
+				if line ~= "" then
+					local parts = vim.split(line, ": ", { plain = true })
+					local rev = parts[1]
+					table.insert(entries, {
+						uri = "vcs://git/commit/" .. rev .. file,
+						display = line,
+						rev = rev,
+					})
+				end
+			end
+			callback(entries, nil)
+		end,
+	})
+end
 
+function M.get_file_content(file, rev, callback)
+	rev = rev or "HEAD"
+	local dir = vim.fs.dirname(file)
+	local rel_file = vim.fs.basename(file)
+	async.run_shell({
+		command = "git -C " .. vim.fn.shellescape(dir) .. " show " .. vim.fn.shellescape(rev .. ":./" .. rel_file),
+		on_exit = function(obj)
+			if obj.code ~= 0 then
+				callback(nil)
+				return
+			end
+			callback(obj.stdout)
+		end,
+	})
+end
+
+return M

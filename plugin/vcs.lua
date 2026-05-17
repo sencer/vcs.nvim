@@ -6,6 +6,7 @@ vim.g.vcs_plugin_loaded = true
 local vcs = require("vcs")
 vcs.register("git", require("vcs.git"))
 vcs.register("hg", require("vcs.hg"))
+require("vcs.gutter")
 
 -- Auto-load modified files if started empty in a repo
 vim.api.nvim_create_autocmd("VimEnter", {
@@ -26,4 +27,8 @@ end, { bang = true })
 
 vim.api.nvim_create_user_command("Child", function(opts)
 	require("vcs").load_child_modified_files(vim.fn.getcwd(), opts.bang)
+end, { bang = true })
+
+vim.api.nvim_create_user_command("Diff", function(opts)
+	require("vcs").diff(opts.bang)
 end, { bang = true })
