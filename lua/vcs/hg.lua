@@ -151,12 +151,20 @@ function M.get_primary_states(file, callback)
 					local parts = vim.split(line, ": ", { plain = true })
 					local rev = parts[1]
 					table.insert(entries, {
-						uri = "vcs://hg/commit/" .. rev .. file,
+						uri = string.format("vcs://hg/diff/%s%s", rev, file),
 						display = line,
 						rev = rev,
 					})
 				end
 			end
+
+			-- Add Working vs .
+			table.insert(entries, 1, {
+				uri = string.format("vcs://hg/diff/working%s", file),
+				display = "working: Working Directory vs .",
+				rev = "working",
+			})
+
 			callback(entries, nil)
 		end,
 	})

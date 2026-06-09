@@ -1,14 +1,44 @@
 local M = {}
+M.on_populate = {}
+M.saved_cursors = {}
 
 local providers = {}
 
 local repo_states = {}
 
-local function get_state(dir)
-	if not repo_states[dir] then
-		repo_states[dir] = { current_rev = "working" }
+local function get_repo_root(dir)
+	local marker = vim.fs.find({ ".git", ".hg" }, {
+		path = dir,
+		upward = true,
+		stop = vim.env.HOME,
+	})[1]
+	if marker then
+		return vim.fs.dirname(marker)
 	end
-	return repo_states[dir]
+	return dir
+end
+
+local function get_state(dir)
+	local root = get_repo_root(dir)
+	if not repo_states[root] then
+		repo_states[root] = { current_rev = "working" }
+	end
+	return repo_states[root]
+end
+
+local function rev_match(rev1, rev2)
+	if not rev1 or not rev2 then return false end
+	if rev1 == "working" or rev2 == "working" then
+		return rev1 == rev2
+	end
+	if #rev1 >= 7 and #rev2 >= 7 then
+		if #rev1 < #rev2 then
+			return rev2:sub(1, #rev1) == rev1
+		else
+			return rev1:sub(1, #rev2) == rev2
+		end
+	end
+	return rev1 == rev2
 end
 local function safe_echo(msg, hl)
 	vim.schedule(function()
@@ -306,7 +336,8 @@ function M.diff(use_secondary)
 	local current_file = vim.api.nvim_buf_get_name(0)
 	if current_file == "" then return end
 
-	local name, provider = M.detect(vim.fs.dirname(current_file))
+	local dir = vim.fs.dirname(current_file)
+	local name, provider = M.detect(dir)
 	if not provider then return end
 
 	local get_states = use_secondary and provider.get_secondary_states or provider.get_primary_states
@@ -314,6 +345,9 @@ function M.diff(use_secondary)
 		safe_echo("No state provider available", "ErrorMsg")
 		return
 	end
+
+	local state = get_state(dir)
+	local target_rev = state.current_rev
 
 	safe_echo("Fetching revision states...")
 	get_states(current_file, function(entries, baseline)
@@ -344,12 +378,34 @@ function M.diff(use_secondary)
 			local active_buf = vim.fn.bufnr(current_file)
 			vim.g.vcs_main_buf = active_buf
 
-			pcall(vim.cmd, "cfirst")
+			local target_index = math.min(2, #entries)
+			if target_rev and target_rev ~= "working" then
+				for i, entry in ipairs(entries) do
+					if rev_match(entry.rev, target_rev) then
+						target_index = math.min(i + 1, #entries)
+						break
+					end
+				end
+			end
+
+			pcall(vim.cmd, "cc " .. target_index)
 		end)
 	end)
 end
 
 vim.api.nvim_create_augroup("VCSSnapshots", { clear = true })
+
+vim.api.nvim_create_autocmd("BufLeave", {
+	group = "VCSSnapshots",
+	pattern = "*",
+	callback = function()
+		local win = vim.api.nvim_get_current_win()
+		if vim.w[win].vcs_main_window or vim.w[win].vcs_base_window then
+			M.saved_cursors[win] = vim.api.nvim_win_get_cursor(win)
+		end
+	end,
+})
+
 vim.api.nvim_create_autocmd("BufReadCmd", {
 	group = "VCSSnapshots",
 	pattern = "vcs://*",
@@ -357,69 +413,162 @@ vim.api.nvim_create_autocmd("BufReadCmd", {
 		local uri = args.file
 		local parts = vim.split(uri:sub(#"vcs://" + 1), "/", { plain = true })
 		local provider_name = parts[1]
-		local rev = parts[3]
-		local path = table.concat(vim.list_slice(parts, 4), "/")
-		if path:sub(1, 1) ~= "/" then
-			path = "/" .. path
-		end
+		local action = parts[2]
 
 		local provider = M.get_provider(provider_name)
-		if not provider or not provider.get_file_content then
-			safe_echo("Provider " .. provider_name .. " cannot fetch content", "ErrorMsg")
+		if not provider then
+			safe_echo("Provider " .. provider_name .. " not found", "ErrorMsg")
 			return
 		end
 
-		local bufnr = args.buf
-		vim.bo[bufnr].bufhidden = "delete"
-		vim.bo[bufnr].buflisted = false
-		vim.bo[bufnr].readonly = true
+		if action == "show" then
+			local rev = parts[3]
+			local path = table.concat(vim.list_slice(parts, 4), "/")
+			if path:sub(1, 1) ~= "/" then
+				path = "/" .. path
+			end
 
-		provider.get_file_content(path, rev, function(content)
-			local function populate()
-				if vim.api.nvim_buf_is_valid(bufnr) then
-					local lines = vim.split(content or "", "\n", { plain = true })
-					vim.bo[bufnr].readonly = false
-					vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-					vim.bo[bufnr].readonly = true
-					vim.bo[bufnr].modified = false
-					vim.cmd("filetype detect")
+			local bufnr = args.buf
+			vim.bo[bufnr].bufhidden = "hide"
+			vim.bo[bufnr].buflisted = false
+			vim.bo[bufnr].readonly = true
 
-					local main_buf = vim.g.vcs_main_buf
-					if main_buf and vim.api.nvim_buf_is_valid(main_buf) then
-						local win_main, win_base
-						for _, win in ipairs(vim.api.nvim_list_wins()) do
-							if vim.w[win].vcs_main_window then win_main = win end
-							if vim.w[win].vcs_base_window then win_base = win end
+			if rev == "EMPTY" then
+				vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+				return
+			end
+
+			if not provider.get_file_content then
+				safe_echo("Provider " .. provider_name .. " cannot fetch content", "ErrorMsg")
+				return
+			end
+
+			provider.get_file_content(path, rev, function(content)
+				local function populate()
+					if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+						local cleaned_content = (content or ""):gsub("\n$", "")
+						local lines = vim.split(cleaned_content, "\n", { plain = true })
+						vim.bo[bufnr].readonly = false
+						vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+						
+						local ft = vim.filetype.match({ filename = path })
+						if ft then
+							vim.bo[bufnr].filetype = ft
+						else
+							vim.cmd("filetype detect")
 						end
 
-						if win_main and win_base and vim.api.nvim_win_is_valid(win_main) and vim.api.nvim_win_is_valid(win_base) then
-							if vim.api.nvim_win_get_buf(win_main) ~= main_buf then
-								vim.api.nvim_win_set_buf(win_main, main_buf)
-							end
-							if vim.api.nvim_win_get_buf(win_base) ~= bufnr then
-								vim.api.nvim_win_set_buf(win_base, bufnr)
-							end
+						vim.bo[bufnr].readonly = true
+						vim.bo[bufnr].modified = false
 
-							vim.api.nvim_win_call(win_main, function() vim.cmd("diffthis") end)
-							vim.api.nvim_win_call(win_base, function() vim.cmd("diffthis") end)
-						else
-							vim.cmd("diffoff!|b " .. main_buf)
-							local w_main = vim.api.nvim_get_current_win()
-							vim.cmd("vert diffsplit " .. vim.fn.fnameescape(uri))
-							local w_base = vim.api.nvim_get_current_win()
-							vim.w[w_main].vcs_main_window = true
-							vim.w[w_base].vcs_base_window = true
+						if M.on_populate[bufnr] then
+							M.on_populate[bufnr]()
+							M.on_populate[bufnr] = nil
 						end
 					end
 				end
+
+				if vim.in_fast_event() then
+					vim.schedule(populate)
+				else
+					populate()
+				end
+			end)
+			return
+		end
+
+		if action == "diff" then
+			local bufnr = args.buf
+			vim.bo[bufnr].bufhidden = "delete"
+			vim.bo[bufnr].buflisted = false
+
+			local rev = parts[3]
+			local path = table.concat(vim.list_slice(parts, 4), "/")
+			if path:sub(1, 1) ~= "/" then
+				path = "/" .. path
 			end
 
-			if vim.in_fast_event() then
-				vim.schedule(populate)
-			else
-				populate()
+			local target_rev = rev
+			if rev == "working" then
+				target_rev = (provider_name == "hg") and "." or "HEAD"
 			end
-		end)
+
+			local uri1 = path
+			local uri2 = string.format("vcs://%s/show/%s%s", provider_name, target_rev, path)
+
+			local function setup_windows(b1, b2)
+				local win_main, win_base
+				for _, win in ipairs(vim.api.nvim_list_wins()) do
+					if vim.w[win].vcs_main_window then win_main = win end
+					if vim.w[win].vcs_base_window then win_base = win end
+				end
+
+				if win_main and win_base and vim.api.nvim_win_is_valid(win_main) and vim.api.nvim_win_is_valid(win_base) then
+					local cursor_main = M.saved_cursors[win_main] or vim.api.nvim_win_get_cursor(win_main)
+					local cursor_base = M.saved_cursors[win_base] or vim.api.nvim_win_get_cursor(win_base)
+					M.saved_cursors[win_main] = nil
+					M.saved_cursors[win_base] = nil
+
+					vim.api.nvim_win_call(win_main, function() vim.cmd("diffoff") end)
+					vim.api.nvim_win_call(win_base, function() vim.cmd("diffoff") end)
+
+					vim.api.nvim_win_set_buf(win_main, b1)
+					vim.api.nvim_win_set_buf(win_base, b2)
+
+					vim.api.nvim_win_call(win_main, function() vim.cmd("diffthis") end)
+					vim.api.nvim_win_call(win_base, function() vim.cmd("diffthis") end)
+
+					local function restore_cursor(win, cursor)
+						if vim.api.nvim_win_is_valid(win) then
+							local buf = vim.api.nvim_win_get_buf(win)
+							local line_count = vim.api.nvim_buf_line_count(buf)
+							local line = math.min(cursor[1], line_count)
+							local col = cursor[2]
+							pcall(vim.api.nvim_win_set_cursor, win, { line, col })
+						end
+					end
+					restore_cursor(win_main, cursor_main)
+					restore_cursor(win_base, cursor_base)
+				else
+					local w_main = vim.api.nvim_get_current_win()
+					vim.api.nvim_win_set_buf(w_main, b1)
+
+					vim.cmd("leftabove vertical split")
+					local w_base = vim.api.nvim_get_current_win()
+					vim.api.nvim_win_set_buf(w_base, b2)
+
+					vim.w[w_main].vcs_main_window = true
+					vim.w[w_base].vcs_base_window = true
+
+					vim.api.nvim_win_call(w_main, function() vim.cmd("diffthis") end)
+					vim.api.nvim_win_call(w_base, function() vim.cmd("diffthis") end)
+
+					vim.api.nvim_set_current_win(w_main)
+				end
+				vim.cmd("diffupdate")
+			end
+
+			local buf1 = vim.fn.bufadd(uri1)
+			local buf2 = vim.fn.bufadd(uri2)
+
+			local function proceed()
+				vim.schedule(function()
+					setup_windows(buf1, buf2)
+				end)
+			end
+
+			vim.schedule(function()
+				vim.fn.bufload(buf1)
+
+				if not vim.api.nvim_buf_is_loaded(buf2) then
+					M.on_populate[buf2] = proceed
+					vim.fn.bufload(buf2)
+				else
+					proceed()
+				end
+			end)
+			return
+		end
 	end,
 })
 
