@@ -302,32 +302,6 @@ function M.load_child_modified_files(dir, exclusive)
 	end)
 end
 
-local function map_cnext(buf)
-	vim.keymap.set("n", "]c", function()
-		local win_base
-		for _, win in ipairs(vim.api.nvim_list_wins()) do
-			if vim.w[win].vcs_base_window then win_base = win break end
-		end
-		if win_base and vim.api.nvim_win_is_valid(win_base) then
-			vim.api.nvim_win_call(win_base, function() pcall(vim.cmd, "cnext") end)
-		else
-			pcall(vim.cmd, "cnext")
-		end
-	end, { buffer = buf, desc = "Next revision" })
-
-	vim.keymap.set("n", "[c", function()
-		local win_base
-		for _, win in ipairs(vim.api.nvim_list_wins()) do
-			if vim.w[win].vcs_base_window then win_base = win break end
-		end
-		if win_base and vim.api.nvim_win_is_valid(win_base) then
-			vim.api.nvim_win_call(win_base, function() pcall(vim.cmd, "cprev") end)
-		else
-			pcall(vim.cmd, "cprev")
-		end
-	end, { buffer = buf, desc = "Previous revision" })
-end
-
 function M.diff(use_secondary)
 	local current_file = vim.api.nvim_buf_get_name(0)
 	if current_file == "" then return end
@@ -369,8 +343,6 @@ function M.diff(use_secondary)
 
 			local active_buf = vim.fn.bufnr(current_file)
 			vim.g.vcs_main_buf = active_buf
-
-			map_cnext(active_buf)
 
 			pcall(vim.cmd, "cfirst")
 		end)
@@ -430,7 +402,6 @@ vim.api.nvim_create_autocmd("BufReadCmd", {
 
 							vim.api.nvim_win_call(win_main, function() vim.cmd("diffthis") end)
 							vim.api.nvim_win_call(win_base, function() vim.cmd("diffthis") end)
-							map_cnext(bufnr)
 						else
 							vim.cmd("diffoff!|b " .. main_buf)
 							local w_main = vim.api.nvim_get_current_win()

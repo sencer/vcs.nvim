@@ -165,6 +165,11 @@ function M.get_stats(bufnr)
 end
 
 function M.next_hunk()
+	if vim.wo.diff then
+		vim.cmd("normal! ]c")
+		return
+	end
+
 	local bufnr = api.nvim_get_current_buf()
 	local hunks = cached_hunks[bufnr]
 	if not hunks or #hunks == 0 then return end
@@ -180,6 +185,11 @@ function M.next_hunk()
 end
 
 function M.prev_hunk()
+	if vim.wo.diff then
+		vim.cmd("normal! [c")
+		return
+	end
+
 	local bufnr = api.nvim_get_current_buf()
 	local hunks = cached_hunks[bufnr]
 	if not hunks or #hunks == 0 then return end
