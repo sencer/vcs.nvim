@@ -124,7 +124,7 @@ function M.attach(bufnr, base_rev)
 	provider.get_file_content(real_file, base_rev, function(content)
 		vim.schedule(function()
 			if api.nvim_buf_is_valid(bufnr) then
-				cached_base[bufnr] = content or ""
+				cached_base[bufnr] = (content or ""):gsub("\n$", "")
 				update_gutter(bufnr)
 
 				local group = api.nvim_create_augroup("VCSGutter_" .. bufnr, { clear = true })
