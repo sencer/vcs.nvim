@@ -174,11 +174,23 @@ function M.get_file_content(file, rev, callback)
 	rev = rev or "."
 	local dir = vim.fs.dirname(file)
 	local rel_file = vim.fs.basename(file)
+	local ignore_command = "cd " .. vim.fn.shellescape(dir) .. " && hg status -i -- " .. vim.fn.shellescape(rel_file)
 	async.run_shell({
 		command = "cd " .. vim.fn.shellescape(dir) .. " && hg cat -r " .. vim.fn.shellescape(rev) .. " -- " .. vim.fn.shellescape(rel_file),
 		on_exit = function(obj)
 			if obj.code ~= 0 then
-				callback(nil)
+				vim.schedule(function()
+					async.run_shell({
+						command = ignore_command,
+						on_exit = function(ignore_obj)
+							if ignore_obj.code == 0 and (ignore_obj.stdout or "") == "" then
+								callback("")
+							else
+								callback(nil)
+							end
+						end,
+					})
+				end)
 				return
 			end
 			callback(obj.stdout)

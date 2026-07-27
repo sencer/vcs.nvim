@@ -190,11 +190,19 @@ function M.get_file_content(file, rev, callback)
 	rev = rev or "HEAD"
 	local dir = vim.fs.dirname(file)
 	local rel_file = vim.fs.basename(file)
+	local ignore_command = "git -C " .. vim.fn.shellescape(dir) .. " check-ignore -q -- " .. vim.fn.shellescape(rel_file)
 	async.run_shell({
 		command = "git -C " .. vim.fn.shellescape(dir) .. " show " .. vim.fn.shellescape(rev .. ":./" .. rel_file),
 		on_exit = function(obj)
 			if obj.code ~= 0 then
-				callback(nil)
+				vim.schedule(function()
+					async.run_shell({
+						command = ignore_command,
+						on_exit = function(ignore_obj)
+							callback(ignore_obj.code == 1 and "" or nil)
+						end,
+					})
+				end)
 				return
 			end
 			callback(obj.stdout)
