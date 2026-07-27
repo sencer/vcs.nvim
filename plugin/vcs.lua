@@ -6,6 +6,7 @@ vim.g.vcs_plugin_loaded = true
 local vcs = require("vcs")
 vcs.register("git", require("vcs.git"))
 vcs.register("hg", require("vcs.hg"))
+vcs.register("jj", require("vcs.jj"))
 require("vcs.gutter")
 
 -- Auto-load modified files if started empty in a repo
