@@ -123,7 +123,7 @@ local function wipe_other_buffers(keep_files)
 				local name = vim.api.nvim_buf_get_name(buf)
 				local abs_name = vim.fn.fnamemodify(name, ":p")
 				if name ~= "" and not keep_set[abs_name] then
-					if not vim.api.nvim_buf_get_option(buf, "modified") then
+					if not vim.bo[buf].modified then
 						vim.api.nvim_buf_delete(buf, { force = false })
 					end
 				end
