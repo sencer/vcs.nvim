@@ -7,7 +7,7 @@ local providers = {}
 local repo_states = {}
 
 local function get_repo_root(dir)
-	local marker = vim.fs.find({ ".git", ".hg" }, {
+	local marker = vim.fs.find({ ".git", ".hg", ".jj" }, {
 		path = dir,
 		upward = true,
 		stop = vim.env.HOME,

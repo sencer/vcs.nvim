@@ -27,7 +27,7 @@ end
 
 function M.get_current_head(dir, callback)
 	async.run_shell({
-		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log -G -r @ -T 'commit_id' --no-pager --color=never",
+		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log --no-graph -r @ -T 'commit_id' --no-pager --color=never",
 		on_exit = function(obj)
 			if obj.code ~= 0 then
 				callback(nil)
@@ -46,7 +46,7 @@ end
 function M.get_parents(dir, rev, callback)
 	local revset = "parents(" .. rev .. ")"
 	async.run_shell({
-		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log -G -r " .. vim.fn.shellescape(revset) .. " -T 'commit_id ++ \"\\n\"' --no-pager --color=never",
+		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log --no-graph -r " .. vim.fn.shellescape(revset) .. " -T 'commit_id ++ \"\\n\"' --no-pager --color=never",
 		on_exit = function(obj)
 			if obj.code ~= 0 then
 				callback({})
@@ -66,7 +66,7 @@ end
 function M.get_children(dir, rev, callback)
 	local revset = "children(" .. rev .. ")"
 	async.run_shell({
-		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log -G -r " .. vim.fn.shellescape(revset) .. " -T 'commit_id ++ \"\\n\"' --no-pager --color=never",
+		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log --no-graph -r " .. vim.fn.shellescape(revset) .. " -T 'commit_id ++ \"\\n\"' --no-pager --color=never",
 		on_exit = function(obj)
 			if obj.code ~= 0 then
 				callback({})
@@ -104,7 +104,7 @@ end
 
 function M.get_revision_info(dir, rev, callback)
 	async.run_shell({
-		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log -G -r " .. vim.fn.shellescape(rev) .. ' -T \'commit_id.short() ++ ": " ++ description.first_line()\' --no-pager --color=never',
+		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log --no-graph -r " .. vim.fn.shellescape(rev) .. ' -T \'commit_id.short() ++ ": " ++ description.first_line()\' --no-pager --color=never',
 		on_exit = function(obj)
 			if obj.code ~= 0 then
 				callback(rev)
@@ -124,7 +124,7 @@ function M.get_primary_states(file, callback)
 	local dir = vim.fs.dirname(file)
 	local rel_file = vim.fs.basename(file)
 	async.run_shell({
-		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log -G -T 'commit_id.short() ++ \"|@|\" ++ description.first_line() ++ \"|@|\" ++ if(current_working_copy, \"true\", \"false\") ++ \"\\n\"' --no-pager --color=never -- " .. vim.fn.shellescape(rel_file),
+		command = "cd " .. vim.fn.shellescape(dir) .. " && jj log --no-graph -T 'commit_id.short() ++ \"|@|\" ++ description.first_line() ++ \"|@|\" ++ if(current_working_copy, \"true\", \"false\") ++ \"\\n\"' --no-pager --color=never -- " .. vim.fn.shellescape(rel_file),
 		on_exit = function(obj)
 			if obj.code ~= 0 then
 				callback({}, nil)
